@@ -1,20 +1,12 @@
 import { Code2 } from 'lucide-react';
-import { EditorType, ThemeMode } from 'shared/types';
-import { useTheme } from '@/components/ThemeProvider';
+import { EditorType } from 'shared/types';
+import { useTheme, getResolvedTheme } from '@/components/ThemeProvider';
+import i18n from '@/i18n';
 
 type IdeIconProps = {
   editorType?: EditorType | null;
   className?: string;
 };
-
-function getResolvedTheme(theme: ThemeMode): 'light' | 'dark' {
-  if (theme === ThemeMode.SYSTEM) {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark'
-      : 'light';
-  }
-  return theme === ThemeMode.DARK ? 'dark' : 'light';
-}
 
 export function getIdeName(editorType: EditorType | undefined | null): string {
   if (!editorType) return 'IDE';
@@ -34,7 +26,7 @@ export function getIdeName(editorType: EditorType | undefined | null): string {
     case EditorType.XCODE:
       return 'Xcode';
     case EditorType.CUSTOM:
-      return 'IDE';
+      return i18n.t('common:editorNames.custom');
     case EditorType.GOOGLE_ANTIGRAVITY:
       return 'Antigravity';
   }

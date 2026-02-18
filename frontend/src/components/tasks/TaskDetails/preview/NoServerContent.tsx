@@ -71,8 +71,12 @@ export function NoServerContent({
         parent_workspace_id: null,
         image_ids: null,
       },
-      executor_profile_id: config.executor_profile,
+      executor_config: {
+        executor: config.executor_profile.executor,
+        variant: config.executor_profile.variant,
+      },
       repos,
+      linked_issue: null,
     });
   };
 

@@ -21,6 +21,10 @@ import {
 import { getModifierKey } from '@/utils/platform';
 import { getLanguageOptions } from '@/i18n/languages';
 import { toPrettyCase } from '@/utils/string';
+import {
+  getExecutorVariantKeys,
+  getSortedExecutorVariantKeys,
+} from '@/utils/executor';
 import { useTheme } from '@/components/ThemeProvider';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { TagManager } from '@/components/TagManager';
@@ -76,8 +80,10 @@ export function GeneralSettingsSection() {
 
   const selectedAgentProfile =
     profiles?.[draft?.executor_profile?.executor || ''];
-  const hasVariants =
-    selectedAgentProfile && Object.keys(selectedAgentProfile).length > 0;
+  const variantOptions = selectedAgentProfile
+    ? getSortedExecutorVariantKeys(selectedAgentProfile)
+    : [];
+  const hasVariants = variantOptions.length > 0;
 
   const validateBranchPrefix = useCallback(
     (prefix: string): string | null => {
@@ -191,14 +197,12 @@ export function GeneralSettingsSection() {
     setDirty(false);
   };
 
-  const resetDisclaimer = async () => {
-    if (!config) return;
-    updateAndSaveConfig({ disclaimer_acknowledged: false });
-  };
-
   const resetOnboarding = async () => {
     if (!config) return;
-    updateAndSaveConfig({ onboarding_acknowledged: false });
+    updateAndSaveConfig({
+      onboarding_acknowledged: false,
+      remote_onboarding_acknowledged: false,
+    });
   };
 
   if (loading) {
@@ -405,10 +409,13 @@ export function GeneralSettingsSection() {
                     key={option.value}
                     onClick={() => {
                       const variants = profiles?.[option.value];
+                      const variantKeys = variants
+                        ? getExecutorVariantKeys(variants)
+                        : [];
                       const keepCurrentVariant =
-                        variants &&
+                        variantKeys.length > 0 &&
                         draft?.executor_profile?.variant &&
-                        variants[draft.executor_profile.variant];
+                        variantKeys.includes(draft.executor_profile.variant);
 
                       const newProfile: ExecutorProfileId = {
                         executor: option.value as BaseCodingAgent,
@@ -438,7 +445,7 @@ export function GeneralSettingsSection() {
                   />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)]">
-                  {Object.keys(selectedAgentProfile).map((variantLabel) => (
+                  {variantOptions.map((variantLabel) => (
                     <DropdownMenuItem
                       key={variantLabel}
                       onClick={() => {
@@ -768,21 +775,6 @@ export function GeneralSettingsSection() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-normal">
-              {t('settings.general.safety.disclaimer.title')}
-            </p>
-            <p className="text-sm text-low">
-              {t('settings.general.safety.disclaimer.description')}
-            </p>
-          </div>
-          <PrimaryButton
-            variant="tertiary"
-            value={t('settings.general.safety.disclaimer.button')}
-            onClick={resetDisclaimer}
-          />
-        </div>
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-normal">
               {t('settings.general.safety.onboarding.title')}
             </p>
             <p className="text-sm text-low">
@@ -795,20 +787,6 @@ export function GeneralSettingsSection() {
             onClick={resetOnboarding}
           />
         </div>
-      </SettingsCard>
-
-      {/* Beta Features */}
-      <SettingsCard
-        title={t('settings.general.beta.title')}
-        description={t('settings.general.beta.description')}
-      >
-        <SettingsCheckbox
-          id="beta-workspaces"
-          label={t('settings.general.beta.workspaces.label')}
-          description={t('settings.general.beta.workspaces.helper')}
-          checked={draft?.beta_workspaces ?? false}
-          onChange={(checked) => updateDraft({ beta_workspaces: checked })}
-        />
       </SettingsCard>
 
       <SettingsSaveBar

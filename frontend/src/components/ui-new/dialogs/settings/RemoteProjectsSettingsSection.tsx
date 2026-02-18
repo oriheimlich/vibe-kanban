@@ -41,6 +41,7 @@ import { CreateRemoteProjectDialog } from '@/components/dialogs/org/CreateRemote
 import { DeleteRemoteProjectDialog } from '@/components/dialogs/org/DeleteRemoteProjectDialog';
 import { useShape } from '@/lib/electric/hooks';
 import { bulkUpdateProjectStatuses } from '@/lib/remoteApi';
+
 import {
   PROJECTS_SHAPE,
   PROJECT_MUTATION,
@@ -805,7 +806,7 @@ export function RemoteProjectsSettingsSection({
     );
   }
 
-  // Auth check - show login prompt if not signed in
+  // Auth check - show sign-in prompt if not signed in
   if (!isSignedIn) {
     return (
       <div className="space-y-4">
@@ -813,7 +814,7 @@ export function RemoteProjectsSettingsSection({
           <h3 className="text-base font-medium text-high">
             {t(
               'settings.remoteProjects.loginRequired.title',
-              'Sign in Required'
+              'Sign in required'
             )}
           </h3>
           <p className="text-sm text-low mt-1">
@@ -825,8 +826,8 @@ export function RemoteProjectsSettingsSection({
         </div>
         <PrimaryButton
           variant="secondary"
-          value={t('settings.remoteProjects.loginRequired.action', 'Sign In')}
-          onClick={() => void OAuthDialog.show()}
+          value={t('settings.remoteProjects.loginRequired.action', 'Sign in')}
+          onClick={() => void OAuthDialog.show({})}
         >
           <SignInIcon className="size-icon-xs mr-1" weight="bold" />
         </PrimaryButton>

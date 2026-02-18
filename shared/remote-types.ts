@@ -4,7 +4,7 @@
 // Electric row types
 export type JsonValue = number | string | boolean | Array<JsonValue> | { [key in string]?: JsonValue } | null;
 
-export type Project = { id: string, organization_id: string, name: string, color: string, created_at: string, updated_at: string, };
+export type Project = { id: string, organization_id: string, name: string, color: string, sort_order: number, created_at: string, updated_at: string, };
 
 export type Notification = { id: string, organization_id: string, user_id: string, notification_type: NotificationType, payload: JsonValue, issue_id: string | null, comment_id: string | null, seen: boolean, dismissed_at: string | null, created_at: string, };
 
@@ -19,6 +19,12 @@ export type Tag = { id: string, project_id: string, name: string, color: string,
 export type Issue = { id: string, project_id: string, issue_number: number, simple_id: string, status_id: string, title: string, description: string | null, priority: IssuePriority | null, start_date: string | null, target_date: string | null, completed_at: string | null, sort_order: number, parent_issue_id: string | null, parent_issue_sort_order: number | null, extension_metadata: JsonValue, creator_user_id: string | null, created_at: string, updated_at: string, };
 
 export type IssueAssignee = { id: string, issue_id: string, user_id: string, assigned_at: string, };
+
+export type Blob = { id: string, project_id: string, blob_path: string, thumbnail_blob_path: string | null, original_name: string, mime_type: string | null, size_bytes: bigint, hash: string, width: number | null, height: number | null, created_at: string, updated_at: string, };
+
+export type Attachment = { id: string, blob_id: string, issue_id: string | null, comment_id: string | null, created_at: string, expires_at: string | null, };
+
+export type AttachmentWithBlob = { id: string, blob_id: string, issue_id: string | null, comment_id: string | null, created_at: string, expires_at: string | null, blob_path: string, thumbnail_blob_path: string | null, original_name: string, mime_type: string | null, size_bytes: bigint, hash: string, width: number | null, height: number | null, };
 
 export type IssueFollower = { id: string, issue_id: string, user_id: string, };
 
@@ -53,7 +59,7 @@ export type CreateProjectRequest = {
  */
 id?: string, organization_id: string, name: string, color: string, };
 
-export type UpdateProjectRequest = { name: string | null, color: string | null, };
+export type UpdateProjectRequest = { name: string | null, color: string | null, sort_order: number | null, };
 
 export type CreateNotificationRequest = { 
 /**
@@ -89,7 +95,7 @@ export type CreateIssueRequest = {
  */
 id?: string, project_id: string, status_id: string, title: string, description: string | null, priority: IssuePriority | null, start_date: string | null, target_date: string | null, completed_at: string | null, sort_order: number, parent_issue_id: string | null, parent_issue_sort_order: number | null, extension_metadata: JsonValue, };
 
-export type UpdateIssueRequest = { status_id: string | null, title: string | null, description: string | null | null, priority: IssuePriority | null | null, start_date: string | null | null, target_date: string | null | null, completed_at: string | null | null, sort_order: number | null, parent_issue_id: string | null | null, parent_issue_sort_order: number | null | null, extension_metadata: JsonValue | null, };
+export type UpdateIssueRequest = { status_id?: string | null, title?: string | null, description?: string | null | null, priority?: IssuePriority | null | null, start_date?: string | null | null, target_date?: string | null | null, completed_at?: string | null | null, sort_order?: number | null, parent_issue_id?: string | null | null, parent_issue_sort_order?: number | null | null, extension_metadata?: JsonValue | null, };
 
 export type CreateIssueAssigneeRequest = { 
 /**
@@ -136,6 +142,18 @@ export type CreateIssueCommentReactionRequest = {
 id?: string, comment_id: string, emoji: string, };
 
 export type UpdateIssueCommentReactionRequest = { emoji: string | null, };
+
+export type InitUploadRequest = { project_id: string, filename: string, size_bytes: number, hash: string, };
+
+export type InitUploadResponse = { upload_url: string, upload_id: string, expires_at: string, skip_upload: boolean, existing_blob_id: string | null, };
+
+export type ConfirmUploadRequest = { project_id: string, upload_id: string, filename: string, content_type?: string, size_bytes: number, hash: string, issue_id?: string, comment_id?: string, };
+
+export type CommitAttachmentsRequest = { attachment_ids: Array<string>, };
+
+export type CommitAttachmentsResponse = { attachments: Array<AttachmentWithBlob>, };
+
+export type AttachmentUrlResponse = { url: string, };
 
 // Shape definition interface
 export interface ShapeDefinition<T> {

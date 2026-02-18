@@ -1,12 +1,13 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import type { Repo, ExecutorProfileId } from 'shared/types';
+import { useContext, useMemo, type ReactNode } from 'react';
+import { createHmrContext } from '@/lib/hmrContext.ts';
+import type { Repo, ExecutorConfig } from 'shared/types';
 import {
   useCreateModeState,
   type CreateModeInitialState,
 } from '@/hooks/useCreateModeState';
 import { useWorkspaces } from '@/components/ui-new/hooks/useWorkspaces';
+import { useUserContext } from '@/contexts/remote/UserContext';
 import { useTask } from '@/hooks/useTask';
-import { useAttemptRepo } from '@/hooks/useAttemptRepo';
 
 interface LinkedIssue {
   issueId: string;
@@ -24,8 +25,8 @@ interface CreateModeContextValue {
   clearRepos: () => void;
   targetBranches: Record<string, string | null>;
   setTargetBranch: (repoId: string, branch: string) => void;
-  selectedProfile: ExecutorProfileId | null;
-  setSelectedProfile: (profile: ExecutorProfileId | null) => void;
+  hasResolvedInitialRepoDefaults: boolean;
+  preferredExecutorConfig: ExecutorConfig | null;
   message: string;
   setMessage: (message: string) => void;
   clearDraft: () => Promise<void>;
@@ -35,9 +36,16 @@ interface CreateModeContextValue {
   linkedIssue: LinkedIssue | null;
   /** Clear the linked issue */
   clearLinkedIssue: () => void;
+  /** Persisted executor config (model selector state) */
+  executorConfig: ExecutorConfig | null;
+  /** Update executor config (triggers debounced scratch save) */
+  setExecutorConfig: (config: ExecutorConfig | null) => void;
 }
 
-const CreateModeContext = createContext<CreateModeContextValue | null>(null);
+const CreateModeContext = createHmrContext<CreateModeContextValue | null>(
+  'CreateModeContext',
+  null
+);
 
 interface CreateModeProviderProps {
   children: ReactNode;
@@ -50,27 +58,37 @@ export function CreateModeProvider({
   initialState,
   draftId,
 }: CreateModeProviderProps) {
-  // Fetch most recent workspace to use as initial values
-  const { workspaces: activeWorkspaces, archivedWorkspaces } = useWorkspaces();
+  // Fetch most recent workspace to seed project selection only
+  const {
+    workspaces: activeWorkspaces,
+    archivedWorkspaces,
+    isLoading: localWorkspacesLoading,
+  } = useWorkspaces();
+  const { workspaces: remoteWorkspaces, isLoading: remoteWorkspacesLoading } =
+    useUserContext();
   const mostRecentWorkspace = activeWorkspaces[0] ?? archivedWorkspaces[0];
+  const localWorkspaceIds = useMemo(
+    () =>
+      new Set([
+        ...activeWorkspaces.map((workspace) => workspace.id),
+        ...archivedWorkspaces.map((workspace) => workspace.id),
+      ]),
+    [activeWorkspaces, archivedWorkspaces]
+  );
 
   const { data: lastWorkspaceTask } = useTask(mostRecentWorkspace?.taskId, {
     enabled: !!mostRecentWorkspace?.taskId,
   });
 
-  const { repos: lastWorkspaceRepos, isLoading: reposLoading } = useAttemptRepo(
-    mostRecentWorkspace?.id,
-    {
-      enabled: !!mostRecentWorkspace?.id,
-    }
-  );
-
   const state = useCreateModeState({
     initialProjectId: lastWorkspaceTask?.project_id,
-    // Pass undefined while loading to prevent premature initialization
-    initialRepos: reposLoading ? undefined : lastWorkspaceRepos,
     initialState,
     draftId,
+    lastWorkspaceId: mostRecentWorkspace?.id ?? null,
+    remoteWorkspaces,
+    localWorkspaceIds,
+    localWorkspacesLoading,
+    remoteWorkspacesLoading,
   });
 
   const value = useMemo<CreateModeContextValue>(
@@ -83,14 +101,16 @@ export function CreateModeProvider({
       clearRepos: state.clearRepos,
       targetBranches: state.targetBranches,
       setTargetBranch: state.setTargetBranch,
-      selectedProfile: state.selectedProfile,
-      setSelectedProfile: state.setSelectedProfile,
+      hasResolvedInitialRepoDefaults: state.hasResolvedInitialRepoDefaults,
+      preferredExecutorConfig: state.preferredExecutorConfig,
       message: state.message,
       setMessage: state.setMessage,
       clearDraft: state.clearDraft,
       hasInitialValue: state.hasInitialValue,
       linkedIssue: state.linkedIssue,
       clearLinkedIssue: state.clearLinkedIssue,
+      executorConfig: state.executorConfig,
+      setExecutorConfig: state.setExecutorConfig,
     }),
     [
       state.selectedProjectId,
@@ -101,14 +121,16 @@ export function CreateModeProvider({
       state.clearRepos,
       state.targetBranches,
       state.setTargetBranch,
-      state.selectedProfile,
-      state.setSelectedProfile,
+      state.hasResolvedInitialRepoDefaults,
+      state.preferredExecutorConfig,
       state.message,
       state.setMessage,
       state.clearDraft,
       state.hasInitialValue,
       state.linkedIssue,
       state.clearLinkedIssue,
+      state.executorConfig,
+      state.setExecutorConfig,
     ]
   );
 

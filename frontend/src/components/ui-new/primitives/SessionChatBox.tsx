@@ -11,6 +11,7 @@ import {
   WarningIcon,
   ArrowUpIcon,
   ArrowsOutIcon,
+  GithubLogoIcon,
 } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -29,7 +30,7 @@ import {
   VisualVariant,
   type DropzoneProps,
   type EditorProps,
-  type VariantProps,
+  type ModelSelectorProps,
 } from './ChatBoxBase';
 import { PrimaryButton } from './PrimaryButton';
 import { ToolbarIconButton, ToolbarDropdown } from './Toolbar';
@@ -53,7 +54,7 @@ import { TodoProgressPopup } from './TodoProgressPopup';
 import { useUserSystem } from '@/components/ConfigProvider';
 
 // Re-export shared types
-export type { EditorProps, VariantProps } from './ChatBoxBase';
+export type { EditorProps, ModelSelectorProps } from './ChatBoxBase';
 
 // Status enum - single source of truth for execution state
 export type ExecutionStatus =
@@ -94,6 +95,7 @@ interface StatsProps {
   linesRemoved?: number;
   hasConflicts?: boolean;
   conflictedFilesCount?: number;
+  onResolveConflicts?: () => void;
 }
 
 interface FeedbackModeProps {
@@ -135,13 +137,14 @@ interface SessionChatBoxProps {
   editor: EditorProps;
   actions: ActionsProps;
   session: SessionProps;
+  workspaceId?: string;
   stats?: StatsProps;
-  variant?: VariantProps;
   feedbackMode?: FeedbackModeProps;
   editMode?: EditModeProps;
   approvalMode?: ApprovalModeProps;
   reviewComments?: ReviewCommentsProps;
   toolbarActions?: ToolbarActionsProps;
+  modelSelector?: ModelSelectorProps;
   error?: string | null;
   repoIds?: string[];
   projectId?: string;
@@ -150,6 +153,7 @@ interface SessionChatBoxProps {
   todos?: TodoItem[];
   inProgressTodo?: TodoItem | null;
   localImages?: LocalImageMetadata[];
+  onPrCommentClick?: () => void;
   onViewCode?: () => void;
   onOpenWorkspace?: () => void;
   onScrollToPreviousMessage?: () => void;
@@ -166,13 +170,14 @@ export function SessionChatBox({
   editor,
   actions,
   session,
+  workspaceId,
   stats,
-  variant,
   feedbackMode,
   editMode,
   approvalMode,
   reviewComments,
   toolbarActions,
+  modelSelector,
   error,
   repoIds,
   projectId,
@@ -181,6 +186,7 @@ export function SessionChatBox({
   todos,
   inProgressTodo,
   localImages,
+  onPrCommentClick,
   onViewCode,
   onOpenWorkspace,
   onScrollToPreviousMessage,
@@ -525,7 +531,6 @@ export function SessionChatBox({
       executor={agent || executor?.selected}
       autoFocus={true}
       focusKey={focusKey}
-      variant={variant}
       error={displayError}
       banner={renderBanner()}
       visualVariant={getVisualVariant()}
@@ -533,6 +538,11 @@ export function SessionChatBox({
       onPasteFiles={actions.onPasteFiles}
       localImages={localImages}
       dropzone={dropzone}
+      modelSelector={
+        modelSelector && agent
+          ? { ...modelSelector, agent, workspaceId }
+          : undefined
+      }
       headerLeft={
         <>
           {/* New session mode: agent icon + executor dropdown */}
@@ -572,9 +582,11 @@ export function SessionChatBox({
               ) : (
                 <>
                   {stats?.hasConflicts && (
-                    <span
-                      className="flex items-center gap-1 text-warning text-sm min-w-0"
+                    <button
+                      type="button"
+                      className="flex items-center gap-1 text-warning text-sm min-w-0 cursor-pointer hover:underline"
                       title={t('conversation.approval.conflictWarning')}
+                      onClick={stats.onResolveConflicts}
                     >
                       <WarningIcon className="size-icon-sm flex-shrink-0" />
                       <span className="truncate">
@@ -582,7 +594,7 @@ export function SessionChatBox({
                           count: stats.conflictedFilesCount,
                         })}
                       </span>
-                    </span>
+                    </button>
                   )}
                   {onOpenWorkspace ? (
                     <PrimaryButton
@@ -729,6 +741,15 @@ export function SessionChatBox({
             className="hidden"
             onChange={handleFileInputChange}
           />
+          {onPrCommentClick && (
+            <ToolbarIconButton
+              icon={GithubLogoIcon}
+              aria-label="Add PR Comments"
+              title="Insert PR comments into message"
+              onClick={onPrCommentClick}
+              disabled={isDisabled || isRunning}
+            />
+          )}
           {toolbarActions?.actions.map((action) => {
             const icon = action.icon;
             // Skip special icons in toolbar (only standard phosphor icons)

@@ -3,7 +3,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::anyhow;
@@ -64,6 +64,8 @@ use uuid::Uuid;
 
 use crate::{command, copy};
 
+const WORKSPACE_TOUCH_DEBOUNCE: Duration = Duration::from_mins(2);
+
 #[derive(Clone)]
 pub struct LocalContainerService {
     db: DBService,
@@ -74,6 +76,7 @@ pub struct LocalContainerService {
     /// When stopping execution, we await these to ensure logs are fully persisted.
     db_stream_handles: Arc<RwLock<HashMap<Uuid, JoinHandle<()>>>>,
     exit_monitor_handles: Arc<RwLock<HashMap<Uuid, JoinHandle<()>>>>,
+    workspace_touch_times: Arc<RwLock<HashMap<Uuid, Instant>>>,
     config: Arc<RwLock<Config>>,
     git: GitService,
     image_service: ImageService,
@@ -101,6 +104,7 @@ impl LocalContainerService {
         let cancellation_tokens = Arc::new(RwLock::new(HashMap::new()));
         let db_stream_handles = Arc::new(RwLock::new(HashMap::new()));
         let exit_monitor_handles = Arc::new(RwLock::new(HashMap::new()));
+        let workspace_touch_times = Arc::new(RwLock::new(HashMap::new()));
         let notification_service = NotificationService::new(config.clone());
 
         let container = LocalContainerService {
@@ -110,6 +114,7 @@ impl LocalContainerService {
             msg_stores,
             db_stream_handles,
             exit_monitor_handles,
+            workspace_touch_times,
             config,
             git,
             image_service,
@@ -888,7 +893,7 @@ impl LocalContainerService {
         ctx: &ExecutionContext,
         queued_data: &DraftFollowUpData,
     ) -> Result<ExecutionProcess, ContainerError> {
-        let executor_profile_id = queued_data.executor_profile_id.clone();
+        let executor_profile_id = queued_data.executor_config.profile_id();
 
         // Validate executor matches session if session has prior executions
         let expected_executor: Option<String> =
@@ -933,13 +938,13 @@ impl LocalContainerService {
                 prompt: queued_data.message.clone(),
                 session_id: info.session_id,
                 reset_to_message_id: None,
-                executor_profile_id: executor_profile_id.clone(),
+                executor_config: queued_data.executor_config.clone(),
                 working_dir: working_dir.clone(),
             })
         } else {
             ExecutorActionType::CodingAgentInitialRequest(CodingAgentInitialRequest {
                 prompt: queued_data.message.clone(),
-                executor_profile_id: executor_profile_id.clone(),
+                executor_config: queued_data.executor_config.clone(),
                 working_dir,
             })
         };
@@ -985,6 +990,39 @@ impl ContainerService for LocalContainerService {
 
     fn notification_service(&self) -> &NotificationService {
         &self.notification_service
+    }
+
+    async fn touch(&self, workspace: &Workspace) -> Result<(), ContainerError> {
+        let now = Instant::now();
+
+        // We debounce touches to avoid excessive database writes, which in SQLites causes DB locks
+        let should_debounce = |last_touch: &Instant| -> bool {
+            now.duration_since(*last_touch) < WORKSPACE_TOUCH_DEBOUNCE
+        };
+
+        // Quick check with read lock
+        if self
+            .workspace_touch_times
+            .read()
+            .await
+            .get(&workspace.id)
+            .is_some_and(should_debounce)
+        {
+            return Ok(());
+        }
+
+        let mut map = self.workspace_touch_times.write().await;
+        // Clean up stale entries older than the debounce window, reduce memory usage over time
+        map.retain(|_, time| should_debounce(time));
+        // check in case another thread has touched already
+        if map.get(&workspace.id).is_some_and(should_debounce) {
+            return Ok(());
+        }
+        map.insert(workspace.id, now);
+        drop(map);
+
+        Workspace::touch(&self.db.pool, workspace.id).await?;
+        Ok(())
     }
 
     async fn store_db_stream_handle(&self, id: Uuid, handle: JoinHandle<()>) {
@@ -1074,7 +1112,7 @@ impl ContainerService for LocalContainerService {
         &self,
         workspace: &Workspace,
     ) -> Result<ContainerRef, ContainerError> {
-        Workspace::touch(&self.db.pool, workspace.id).await?;
+        self.touch(workspace).await?;
         let repositories =
             WorkspaceRepo::find_repos_for_workspace(&self.db.pool, workspace.id).await?;
 
@@ -1189,21 +1227,7 @@ impl ContainerService for LocalContainerService {
             commit_reminder_prompt,
         );
 
-        // Load task and project context for environment variables
-        let task = workspace
-            .parent_task(&self.db.pool)
-            .await?
-            .ok_or(ContainerError::Other(anyhow!(
-                "Task not found for workspace"
-            )))?;
-        let project = task
-            .parent_project(&self.db.pool)
-            .await?
-            .ok_or(ContainerError::Other(anyhow!("Project not found for task")))?;
-
-        env.insert("VK_PROJECT_NAME", &project.name);
-        env.insert("VK_PROJECT_ID", project.id.to_string());
-        env.insert("VK_TASK_ID", task.id.to_string());
+        // Always inject workspace/session context
         env.insert("VK_WORKSPACE_ID", workspace.id.to_string());
         env.insert("VK_WORKSPACE_BRANCH", &workspace.branch);
         env.insert("VK_SESSION_ID", execution_process.session_id.to_string());

@@ -26,6 +26,7 @@ import { ChangeTargetBranchDialog } from '@/components/dialogs/tasks/ChangeTarge
 import RepoSelector from '@/components/tasks/RepoSelector';
 import { RebaseDialog } from '@/components/dialogs/tasks/RebaseDialog';
 import { CreatePRDialog } from '@/components/dialogs/tasks/CreatePRDialog';
+
 import { useTranslation } from 'react-i18next';
 import { useAttemptRepo } from '@/hooks/useAttemptRepo';
 import { useGitOperations } from '@/hooks/useGitOperations';
@@ -39,6 +40,7 @@ interface GitOperationsProps {
   isAttemptRunning: boolean;
   selectedBranch: string | null;
   layout?: 'horizontal' | 'vertical';
+  issueIdentifier?: string;
 }
 
 export type GitOperationsInputs = Omit<GitOperationsProps, 'selectedAttempt'>;
@@ -51,6 +53,7 @@ function GitOperations({
   isAttemptRunning,
   selectedBranch,
   layout = 'horizontal',
+  issueIdentifier,
 }: GitOperationsProps) {
   const { t } = useTranslation('tasks');
 
@@ -257,6 +260,7 @@ function GitOperations({
       task,
       repoId: getSelectedRepoId(),
       targetBranch: getSelectedRepoStatus()?.target_branch_name,
+      issueIdentifier,
     });
   };
 

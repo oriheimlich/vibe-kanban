@@ -26,7 +26,7 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { JSONEditor } from '@/components/ui/json-editor';
 import { Loader2 } from 'lucide-react';
-import type { BaseCodingAgent, ExecutorConfig } from 'shared/types';
+import type { BaseCodingAgent, ExecutorProfile } from 'shared/types';
 import { McpConfig } from 'shared/types';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { mcpServersApi } from '@/lib/api';
@@ -39,9 +39,8 @@ export function McpSettings() {
   const [mcpConfig, setMcpConfig] = useState<McpConfig | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpLoading, setMcpLoading] = useState(true);
-  const [selectedProfile, setSelectedProfile] = useState<ExecutorConfig | null>(
-    null
-  );
+  const [selectedProfile, setSelectedProfile] =
+    useState<ExecutorProfile | null>(null);
   const [mcpApplying, setMcpApplying] = useState(false);
   const [mcpConfigPath, setMcpConfigPath] = useState<string>('');
   const [success, setSuccess] = useState(false);
@@ -62,7 +61,7 @@ export function McpSettings() {
 
   // Load existing MCP configuration when selected profile changes
   useEffect(() => {
-    const loadMcpServersForProfile = async (profile: ExecutorConfig) => {
+    const loadMcpServersForProfile = async (profile: ExecutorProfile) => {
       // Reset state when loading
       setMcpLoading(true);
       setMcpError(null);
@@ -332,7 +331,9 @@ export function McpSettings() {
                     : '{\n  "server-name": {\n    "type": "stdio",\n    "command": "your-command",\n    "args": ["arg1", "arg2"]\n  }\n}'
                 }
                 value={
-                  mcpLoading ? t('settings.mcp.loading.jsonEditor') : mcpServers
+                  mcpLoading
+                    ? t('settings.mcp.loadingStates.jsonEditor')
+                    : mcpServers
                 }
                 onChange={handleMcpServersChange}
                 disabled={mcpLoading}
@@ -345,7 +346,7 @@ export function McpSettings() {
               )}
               <div className="text-sm text-muted-foreground">
                 {mcpLoading ? (
-                  t('settings.mcp.loading.configuration')
+                  t('settings.mcp.loadingStates.configuration')
                 ) : (
                   <span>
                     {t('settings.mcp.labels.saveLocation')}

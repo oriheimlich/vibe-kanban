@@ -2,7 +2,7 @@ import { electricCollectionOptions } from '@tanstack/electric-db-collection';
 import { createCollection } from '@tanstack/react-db';
 
 import { tokenManager } from '../auth/tokenManager';
-import { makeRequest, REMOTE_API_URL } from '@/lib/remoteApi';
+import { makeRequest, getRemoteApiUrl } from '@/lib/remoteApi';
 import type { MutationDefinition, ShapeDefinition } from 'shared/remote-types';
 import type { CollectionConfig, SyncError } from './types';
 
@@ -55,16 +55,29 @@ class ErrorHandler {
 
 /**
  * Create a fetch wrapper that catches network errors and reports them.
+ * When isPaused returns true (during token refresh or after logout),
+ * requests are aborted to prevent 401 spam from cached Electric shapes.
  * Note: Debouncing is handled by the onError callback, not here.
  */
 function createErrorHandlingFetch(
   errorHandler: ErrorHandler,
-  onError?: (error: SyncError) => void
+  onError?: (error: SyncError) => void,
+  isPaused?: () => boolean
 ) {
   return async (
     input: RequestInfo | URL,
     init?: RequestInit
   ): Promise<Response> => {
+    // Abort requests while paused (logged out or refreshing token).
+    // This prevents cached Electric shapes from sending unauthenticated
+    // requests that would trigger 401s and login dialog prompts.
+    if (isPaused?.()) {
+      throw new DOMException(
+        'Shape request aborted: not authenticated',
+        'AbortError'
+      );
+    }
+
     try {
       const response = await fetch(input, init);
       // Reset error state on successful response
@@ -126,11 +139,12 @@ function getAuthenticatedShapeOptions(
   // Create error handler for this shape's lifecycle
   const errorHandler = new ErrorHandler();
 
-  // Track pause state during token refresh
+  // Track pause state during token refresh or logout
   let isPaused = false;
 
   // Register with tokenManager for pause/resume during token refresh.
   // This prevents 401 spam when multiple shapes hit auth errors simultaneously.
+  // Shapes are also paused on logout and resumed on login.
   tokenManager.registerShape({
     pause: () => {
       isPaused = true;
@@ -155,19 +169,30 @@ function getAuthenticatedShapeOptions(
   };
 
   return {
-    url: `${REMOTE_API_URL}${url}`,
+    url: `${getRemoteApiUrl()}${url}`,
     params,
     headers: {
       Authorization: async () => {
         const token = await tokenManager.getToken();
-        return token ? `Bearer ${token}` : '';
+        if (!token) {
+          // No token means user is logged out — pause this shape so the
+          // fetchClient aborts the request instead of sending it without auth.
+          isPaused = true;
+          return '';
+        }
+        return `Bearer ${token}`;
       },
     },
     parser: {
       timestamptz: (value: string) => value,
     },
-    // Custom fetch wrapper to catch network-level errors
-    fetchClient: createErrorHandlingFetch(errorHandler, reportError),
+    // Custom fetch wrapper to catch network-level errors.
+    // Aborts requests while paused (during token refresh or after logout).
+    fetchClient: createErrorHandlingFetch(
+      errorHandler,
+      reportError,
+      () => isPaused
+    ),
     // Electric's onError callback (for non-network errors like 4xx/5xx responses)
     onError: (error: { status?: number; message?: string; name?: string }) => {
       // Ignore errors while paused (expected during token refresh)
@@ -314,24 +339,49 @@ function buildMutationHandlers(
     onUpdate: async ({
       transaction,
     }: MutationFnParams): Promise<{ txid: number[] }> => {
-      const results = await Promise.all(
-        transaction.mutations.map(async (m) => {
-          const { key, changes } = m;
-          const response = await makeRequest(`${mutation.url}/${key}`, {
-            method: 'PATCH',
-            body: JSON.stringify(changes),
-          });
-          if (!response.ok) {
-            const error = await response.json();
-            throw new Error(
-              error.message || `Failed to update ${mutation.name}`
-            );
+      if (transaction.mutations.length > 1) {
+        const updates = transaction.mutations.map((m) => {
+          if (!m.key) {
+            throw new Error(`Failed to update ${mutation.name}: missing key`);
           }
-          const result = (await response.json()) as { txid: number };
-          return result.txid;
-        })
+          return {
+            id: String(m.key),
+            ...(m.changes as Record<string, unknown>),
+          };
+        });
+
+        const response = await makeRequest(`${mutation.url}/bulk`, {
+          method: 'POST',
+          body: JSON.stringify({ updates }),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(
+            error.message || `Failed to bulk update ${mutation.name}`
+          );
+        }
+        const result = (await response.json()) as { txid: number };
+        return { txid: [result.txid] };
+      }
+
+      const mutationItem = transaction.mutations[0];
+      if (!mutationItem?.key) {
+        throw new Error(`Failed to update ${mutation.name}: missing key`);
+      }
+
+      const response = await makeRequest(
+        `${mutation.url}/${mutationItem.key}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(mutationItem.changes),
+        }
       );
-      return { txid: results };
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || `Failed to update ${mutation.name}`);
+      }
+      const result = (await response.json()) as { txid: number };
+      return { txid: [result.txid] };
     },
     onDelete: async ({
       transaction,

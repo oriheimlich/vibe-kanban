@@ -1,13 +1,9 @@
-import {
-  createContext,
-  useContext,
-  ReactNode,
-  useMemo,
-  useEffect,
-} from 'react';
+import { useContext, ReactNode, useMemo } from 'react';
+import { createHmrContext } from '@/lib/hmrContext.ts';
 import { useLocation } from 'react-router-dom';
 import type { Project } from 'shared/types';
 import { useProjects } from '@/hooks/useProjects';
+import { usePageTitle } from '@/hooks/usePageTitle';
 
 interface ProjectContextValue {
   projectId: string | undefined;
@@ -17,7 +13,10 @@ interface ProjectContextValue {
   isError: boolean;
 }
 
-const ProjectContext = createContext<ProjectContextValue | null>(null);
+const ProjectContext = createHmrContext<ProjectContextValue | null>(
+  'ProjectContext',
+  null
+);
 
 interface ProjectProviderProps {
   children: ReactNode;
@@ -46,14 +45,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     [projectId, project, isLoading, error]
   );
 
-  // Centralized page title management
-  useEffect(() => {
-    if (project) {
-      document.title = `${project.name} | vibe-kanban`;
-    } else {
-      document.title = 'vibe-kanban';
-    }
-  }, [project]);
+  usePageTitle(project?.name);
 
   return (
     <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>

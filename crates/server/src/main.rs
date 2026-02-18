@@ -36,7 +36,7 @@ async fn main() -> Result<(), VibeKanbanError> {
 
     let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
     let filter_string = format!(
-        "warn,server={level},services={level},db={level},executors={level},deployment={level},local_deployment={level},utils={level}",
+        "warn,server={level},services={level},db={level},executors={level},deployment={level},local_deployment={level},utils={level},codex_core=off",
         level = log_level
     );
     let env_filter = EnvFilter::try_new(filter_string).expect("Failed to create tracing filter");
@@ -70,6 +70,7 @@ async fn main() -> Result<(), VibeKanbanError> {
     deployment
         .track_if_analytics_allowed("session_start", serde_json::json!({}))
         .await;
+
     // Pre-warm file search cache for most active projects
     let deployment_for_cache = deployment.clone();
     tokio::spawn(async move {
@@ -80,6 +81,11 @@ async fn main() -> Result<(), VibeKanbanError> {
         {
             tracing::warn!("Failed to warm file search cache: {}", e);
         }
+    });
+
+    // Preload global executor options cache for all executors with DEFAULT presets
+    tokio::spawn(async move {
+        executors::executors::utils::preload_global_executor_options_cache().await;
     });
 
     let app_router = routes::router(deployment.clone());

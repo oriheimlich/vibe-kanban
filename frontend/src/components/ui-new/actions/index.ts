@@ -79,6 +79,7 @@ import { EditorSelectionDialog } from '@/components/dialogs/tasks/EditorSelectio
 import { StartReviewDialog } from '@/components/dialogs/tasks/StartReviewDialog';
 import posthog from 'posthog-js';
 import { WorkspacesGuideDialog } from '@/components/ui-new/dialogs/WorkspacesGuideDialog';
+import { ProjectsGuideDialog } from '@/components/ui-new/dialogs/ProjectsGuideDialog';
 import { SettingsDialog } from '@/components/ui-new/dialogs/SettingsDialog';
 import { CreateWorkspaceFromPrDialog } from '@/components/dialogs/CreateWorkspaceFromPrDialog';
 
@@ -100,6 +101,7 @@ export type ActionIcon = Icon | SpecialIconType;
 // Workspace type for sidebar (minimal subset needed for workspace selection)
 interface SidebarWorkspace {
   id: string;
+  isRunning?: boolean;
 }
 
 // Dev server state type for visibility context
@@ -109,6 +111,7 @@ export type DevServerState = 'stopped' | 'starting' | 'running' | 'stopping';
 export interface ProjectMutations {
   removeIssue: (id: string) => void;
   duplicateIssue: (issueId: string) => void;
+  getIssue: (issueId: string) => { simple_id: string } | undefined;
 }
 
 // Context provided to action executors (from React hooks)
@@ -215,6 +218,8 @@ interface ActionBase {
   icon: ActionIcon;
   shortcut?: string;
   variant?: 'default' | 'destructive';
+  // Optional search keywords - included in command bar search but not displayed
+  keywords?: string[];
   // Optional visibility condition - if omitted, action is always visible
   isVisible?: (ctx: ActionVisibilityContext) => boolean;
   // Optional active state - if omitted, action is not active
@@ -521,6 +526,7 @@ export const Actions = {
     id: 'create-workspace-from-pr',
     label: 'Create Workspace from PR',
     icon: GitPullRequestIcon,
+    keywords: ['pull request'],
     requiresTarget: ActionTargetType.NONE,
     execute: async () => {
       await CreateWorkspaceFromPrDialog.show({});
@@ -565,7 +571,7 @@ export const Actions = {
       const { OAuthDialog } = await import(
         '@/components/dialogs/global/OAuthDialog'
       );
-      await OAuthDialog.show();
+      await OAuthDialog.show({});
     },
   } satisfies GlobalActionDefinition,
 
@@ -606,10 +612,22 @@ export const Actions = {
     label: 'Workspaces Guide',
     icon: QuestionIcon,
     requiresTarget: ActionTargetType.NONE,
+    isVisible: (ctx) => ctx.layoutMode === 'workspaces',
     execute: async () => {
       await WorkspacesGuideDialog.show();
     },
   },
+
+  ProjectsGuide: {
+    id: 'projects-guide',
+    label: 'Projects Guide',
+    icon: QuestionIcon,
+    requiresTarget: ActionTargetType.NONE,
+    isVisible: (ctx) => ctx.layoutMode === 'kanban',
+    execute: async () => {
+      await ProjectsGuideDialog.show();
+    },
+  } satisfies GlobalActionDefinition,
 
   OpenCommandBar: {
     id: 'open-command-bar',
@@ -956,6 +974,16 @@ export const Actions = {
       const repos = await attemptsApi.getRepos(workspaceId);
       const repo = repos.find((r) => r.id === repoId);
 
+      // Resolve vibe-kanban identifier from remote workspace + issue
+      let issueIdentifier: string | undefined;
+      const remoteWs = ctx.remoteWorkspaces.find(
+        (w) => w.local_workspace_id === workspaceId
+      );
+      if (remoteWs?.issue_id && ctx.projectMutations?.getIssue) {
+        const issue = ctx.projectMutations.getIssue(remoteWs.issue_id);
+        issueIdentifier = issue?.simple_id || remoteWs.issue_id;
+      }
+
       const result = await CreatePRDialog.show({
         attempt: workspace,
         task: {
@@ -966,10 +994,50 @@ export const Actions = {
         },
         repoId,
         targetBranch: repo?.target_branch,
+        issueIdentifier,
       });
 
       if (!result.success && result.error) {
         throw new Error(result.error);
+      }
+    },
+  },
+
+  GitLinkPR: {
+    id: 'git-link-pr',
+    label: 'Link Pull Request',
+    icon: LinkIcon,
+    requiresTarget: ActionTargetType.GIT,
+    isVisible: (ctx) => ctx.hasWorkspace && ctx.hasGitRepos && !ctx.hasOpenPR,
+    execute: async (ctx, workspaceId, repoId) => {
+      const result = await attemptsApi.attachPr(workspaceId, {
+        repo_id: repoId,
+      });
+
+      if (result.success && result.data.pr_attached && result.data.pr_number) {
+        invalidateWorkspaceQueries(ctx.queryClient, workspaceId);
+        ctx.queryClient.invalidateQueries({
+          queryKey: ['branch-status'],
+        });
+
+        await ConfirmDialog.show({
+          title: 'Pull Request Linked',
+          message: `Linked PR #${result.data.pr_number}${result.data.pr_url ? ` — ${result.data.pr_url}` : ''}`,
+          confirmText: 'OK',
+          showCancelButton: false,
+          variant: 'success',
+        });
+      } else if (result.success && !result.data.pr_attached) {
+        await ConfirmDialog.show({
+          title: 'No Pull Request Found',
+          message:
+            'No open pull request was found matching this branch. Make sure a PR exists for this branch on the remote.',
+          confirmText: 'OK',
+          showCancelButton: false,
+          variant: 'info',
+        });
+      } else if (!result.success) {
+        throw new Error(result.message || 'Failed to attach PR');
       }
     },
   },
@@ -1006,6 +1074,13 @@ export const Actions = {
         (repoStatus?.conflicted_files?.length ?? 0) > 0;
 
       if (hasConflicts && repoStatus) {
+        // Skip showing the dialog if a process is already running
+        // (e.g. an AI session is already resolving these conflicts)
+        const isRunning = ctx.activeWorkspaces.find(
+          (w) => w.id === workspaceId
+        )?.isRunning;
+        if (isRunning) return;
+
         // Show resolve conflicts dialog
         const workspace = await getWorkspace(ctx.queryClient, workspaceId);
         const result = await ResolveConflictsDialog.show({
@@ -1163,8 +1238,13 @@ export const Actions = {
     icon: GearIcon,
     requiresTarget: ActionTargetType.GIT,
     isVisible: (ctx) => ctx.hasWorkspace && ctx.hasGitRepos,
-    execute: (ctx, _workspaceId, repoId) => {
-      ctx.navigate(`/settings/repos?repoId=${repoId}`);
+    execute: async (_ctx, _workspaceId, repoId) => {
+      await SettingsDialog.show({
+        initialSection: 'repos',
+        initialState: {
+          repoId,
+        },
+      });
     },
   },
 
@@ -1560,6 +1640,7 @@ export const NavbarActionGroups = {
     Actions.OpenCommandBar,
     Actions.Feedback,
     Actions.WorkspacesGuide,
+    Actions.ProjectsGuide,
     Actions.Settings,
   ] as NavbarItem[],
 };

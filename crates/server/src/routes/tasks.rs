@@ -20,10 +20,13 @@ use db::models::{
     workspace_repo::{CreateWorkspaceRepo, WorkspaceRepo},
 };
 use deployment::Deployment;
-use executors::profile::ExecutorProfileId;
+use executors::profile::ExecutorConfig;
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
-use services::services::{container::ContainerService, workspace_manager::WorkspaceManager};
+use services::services::{
+    container::ContainerService, image::ImageService, remote_client::RemoteClient,
+    workspace_manager::WorkspaceManager,
+};
 use sqlx::Error as SqlxError;
 use ts_rs::TS;
 use utils::response::ApiResponse;
@@ -137,16 +140,99 @@ pub async fn create_task(
     Ok(ResponseJson(ApiResponse::success(task)))
 }
 
-#[derive(Debug, Deserialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+pub struct LinkedIssueInfo {
+    pub remote_project_id: Uuid,
+    pub issue_id: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
 pub struct CreateAndStartTaskRequest {
     pub task: CreateTask,
-    pub executor_profile_id: ExecutorProfileId,
+    pub executor_config: ExecutorConfig,
     pub repos: Vec<WorkspaceRepoInput>,
+    pub linked_issue: Option<LinkedIssueInfo>,
+}
+
+struct ImportedImage {
+    image_id: Uuid,
+    attachment_id: Uuid,
+    vibe_path: String,
+}
+
+/// Downloads attachments from a remote issue and stores them in the local cache.
+async fn import_issue_attachments(
+    client: &RemoteClient,
+    image_service: &ImageService,
+    issue_id: Uuid,
+) -> anyhow::Result<Vec<ImportedImage>> {
+    let response = client.list_issue_attachments(issue_id).await?;
+
+    let mut imported = Vec::new();
+
+    for entry in response.attachments {
+        // Only import image types
+        let is_image = entry
+            .attachment
+            .mime_type
+            .as_ref()
+            .is_some_and(|m| m.starts_with("image/"));
+        if !is_image {
+            continue;
+        }
+
+        let file_url = match &entry.file_url {
+            Some(url) => url,
+            None => {
+                tracing::warn!(
+                    "No file_url for attachment {}, skipping",
+                    entry.attachment.id
+                );
+                continue;
+            }
+        };
+        let bytes = match client.download_from_url(file_url).await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to download attachment {}: {}",
+                    entry.attachment.id,
+                    e
+                );
+                continue;
+            }
+        };
+
+        let image = match image_service
+            .store_image(&bytes, &entry.attachment.original_name)
+            .await
+        {
+            Ok(img) => img,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to store imported image '{}': {}",
+                    entry.attachment.original_name,
+                    e
+                );
+                continue;
+            }
+        };
+
+        let vibe_path = format!("{}/{}", utils::path::VIBE_IMAGES_DIR, image.file_path);
+
+        imported.push(ImportedImage {
+            image_id: image.id,
+            attachment_id: entry.attachment.id,
+            vibe_path,
+        });
+    }
+
+    Ok(imported)
 }
 
 pub async fn create_task_and_start(
     State(deployment): State<DeploymentImpl>,
-    Json(payload): Json<CreateAndStartTaskRequest>,
+    Json(mut payload): Json<CreateAndStartTaskRequest>,
 ) -> Result<ResponseJson<ApiResponse<TaskWithAttemptStatus>>, ApiError> {
     if payload.repos.is_empty() {
         return Err(ApiError::BadRequest(
@@ -155,6 +241,44 @@ pub async fn create_task_and_start(
     }
 
     let pool = &deployment.db().pool;
+
+    // Import images from linked remote issue before creating the task,
+    // so the description and image_ids are complete from the start.
+    if let Some(linked_issue) = &payload.linked_issue
+        && let Ok(client) = deployment.remote_client()
+    {
+        match import_issue_attachments(&client, deployment.image(), linked_issue.issue_id).await {
+            Ok(imported) if !imported.is_empty() => {
+                // Replace attachment:// references with local .vibe-images/ paths
+                if let Some(desc) = &mut payload.task.description {
+                    for img in &imported {
+                        let placeholder = format!("attachment://{}", img.attachment_id);
+                        *desc = desc.replace(&placeholder, &img.vibe_path);
+                    }
+                }
+
+                let imported_ids: Vec<Uuid> = imported.iter().map(|i| i.image_id).collect();
+                match &mut payload.task.image_ids {
+                    Some(ids) => ids.extend(imported_ids),
+                    None => payload.task.image_ids = Some(imported_ids),
+                }
+
+                tracing::info!(
+                    "Imported {} images from issue {}",
+                    imported.len(),
+                    linked_issue.issue_id
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to import issue attachments for issue {}: {}",
+                    linked_issue.issue_id,
+                    e
+                );
+            }
+        }
+    }
 
     let task_id = Uuid::new_v4();
     let task = Task::create(pool, &payload.task, task_id).await?;
@@ -222,7 +346,7 @@ pub async fn create_task_and_start(
 
     let is_attempt_running = deployment
         .container()
-        .start_workspace(&workspace, payload.executor_profile_id.clone())
+        .start_workspace(&workspace, payload.executor_config.clone())
         .await
         .inspect_err(|err| tracing::error!("Failed to start task attempt: {}", err))
         .is_ok();
@@ -231,8 +355,8 @@ pub async fn create_task_and_start(
             "task_attempt_started",
             serde_json::json!({
                 "task_id": task.id.to_string(),
-                "executor": &payload.executor_profile_id.executor,
-                "variant": &payload.executor_profile_id.variant,
+                "executor": &payload.executor_config.executor,
+                "variant": &payload.executor_config.variant,
                 "workspace_id": workspace.id.to_string(),
             }),
         )
@@ -247,7 +371,7 @@ pub async fn create_task_and_start(
         task,
         has_in_progress_attempt: is_attempt_running,
         last_attempt_failed: false,
-        executor: payload.executor_profile_id.executor.to_string(),
+        executor: payload.executor_config.executor.to_string(),
     })))
 }
 

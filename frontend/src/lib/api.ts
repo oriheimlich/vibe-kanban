@@ -48,7 +48,9 @@ import {
   CheckEditorAvailabilityResponse,
   AvailabilityInfo,
   BaseCodingAgent,
-  ExecutorProfileId,
+  ExecutorConfig,
+  DraftFollowUpData,
+  AgentPresetOptionsQuery,
   RunAgentSetupRequest,
   RunAgentSetupResponse,
   GhCliSetupError,
@@ -90,12 +92,15 @@ import {
   OpenPrInfo,
   GitRemote,
   ListPrsError,
+  AttachExistingPrRequest,
+  AttachPrResponse,
   CreateWorkspaceFromPrBody,
   CreateWorkspaceFromPrResponse,
   CreateFromPrError,
   MigrationRequest,
   MigrationResponse,
 } from 'shared/types';
+import type { Project as RemoteProject } from 'shared/remote-types';
 import type { WorkspaceWithSession } from '@/types/attempt';
 import { createWorkspaceWithSession } from '@/types/attempt';
 
@@ -133,6 +138,10 @@ export type Err<E> = { success: false; error: E | undefined; message?: string };
 
 // Result type for endpoints that need typed errors
 export type Result<T, E> = Ok<T> | Err<E>;
+
+type ListRemoteProjectsResponse = {
+  projects: RemoteProject[];
+};
 
 // Special handler for Result-returning endpoints
 const handleApiResponseAsResult = async <T, E>(
@@ -450,12 +459,6 @@ export const attemptsApi = {
     return handleApiResponse<Workspace[]>(response);
   },
 
-  /** Get total count of workspaces */
-  getCount: async (): Promise<number> => {
-    const response = await makeRequest('/api/task-attempts/count');
-    return handleApiResponse<number>(response);
-  },
-
   get: async (attemptId: string): Promise<Workspace> => {
     const response = await makeRequest(`/api/task-attempts/${attemptId}`);
     return handleApiResponse<Workspace>(response);
@@ -703,6 +706,21 @@ export const attemptsApi = {
       body: JSON.stringify(data),
     });
     return handleApiResponseAsResult<string, PrError>(response);
+  },
+
+  /** Try to auto-attach a PR by matching the workspace branch */
+  attachPr: async (
+    attemptId: string,
+    data: AttachExistingPrRequest
+  ): Promise<Result<AttachPrResponse, PrError>> => {
+    const response = await makeRequest(
+      `/api/task-attempts/${attemptId}/pr/attach`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+    return handleApiResponseAsResult<AttachPrResponse, PrError>(response);
   },
 
   startDevServer: async (attemptId: string): Promise<ExecutionProcess[]> => {
@@ -1219,6 +1237,9 @@ export const oauthApi = {
   /** Returns the current access token for the remote server (auto-refreshes if needed) */
   getToken: async (): Promise<TokenResponse | null> => {
     const response = await makeRequest('/api/auth/token');
+    if (response.status === 401) {
+      throw new ApiError('Unauthorized', 401, response);
+    }
     if (!response.ok) return null;
     return handleApiResponse<TokenResponse>(response);
   },
@@ -1338,6 +1359,19 @@ export const organizationsApi = {
   },
 };
 
+export const remoteProjectsApi = {
+  listByOrganization: async (
+    organizationId: string
+  ): Promise<RemoteProject[]> => {
+    const response = await makeRequest(
+      `/api/remote/projects?organization_id=${encodeURIComponent(organizationId)}`
+    );
+    const result =
+      await handleApiResponse<ListRemoteProjectsResponse>(response);
+    return result.projects;
+  },
+};
+
 // Scratch API
 export const scratchApi = {
   create: async (
@@ -1382,7 +1416,7 @@ export const scratchApi = {
 
 // Agents API
 export const agentsApi = {
-  getSlashCommandsStreamUrl: (
+  getDiscoveredOptionsStreamUrl: (
     agent: BaseCodingAgent,
     opts?: { workspaceId?: string; repoId?: string }
   ): string => {
@@ -1391,7 +1425,19 @@ export const agentsApi = {
     if (opts?.workspaceId) params.set('workspace_id', opts.workspaceId);
     if (opts?.repoId) params.set('repo_id', opts.repoId);
 
-    return `/api/agents/slash-commands/ws?${params.toString()}`;
+    return `/api/agents/discovered-options/ws?${params.toString()}`;
+  },
+
+  getPresetOptions: async (
+    query: AgentPresetOptionsQuery
+  ): Promise<ExecutorConfig> => {
+    const params = new URLSearchParams();
+    params.set('executor', query.executor);
+    if (query.variant) params.set('variant', query.variant);
+    const response = await makeRequest(
+      `/api/agents/preset-options?${params.toString()}`
+    );
+    return handleApiResponse<ExecutorConfig>(response);
   },
 };
 
@@ -1402,7 +1448,7 @@ export const queueApi = {
    */
   queue: async (
     sessionId: string,
-    data: { message: string; executor_profile_id: ExecutorProfileId }
+    data: DraftFollowUpData
   ): Promise<QueueStatus> => {
     const response = await makeRequest(`/api/sessions/${sessionId}/queue`, {
       method: 'POST',
