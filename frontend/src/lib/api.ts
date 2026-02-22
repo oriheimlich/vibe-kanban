@@ -95,6 +95,8 @@ import {
   CreateWorkspaceFromPrBody,
   CreateWorkspaceFromPrResponse,
   CreateFromPrError,
+  ScheduledExecution,
+  CreateScheduledExecutionRequest,
 } from 'shared/types';
 import type { WorkspaceWithSession } from '@/types/attempt';
 import { createWorkspaceWithSession } from '@/types/attempt';
@@ -1395,5 +1397,36 @@ export const queueApi = {
   getStatus: async (sessionId: string): Promise<QueueStatus> => {
     const response = await makeRequest(`/api/sessions/${sessionId}/queue`);
     return handleApiResponse<QueueStatus>(response);
+  },
+};
+
+export const scheduledExecutionsApi = {
+  create: async (
+    data: CreateScheduledExecutionRequest
+  ): Promise<ScheduledExecution> => {
+    const response = await makeRequest('/api/scheduled-executions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return handleApiResponse<ScheduledExecution>(response);
+  },
+
+  list: async (projectId: string): Promise<ScheduledExecution[]> => {
+    const response = await makeRequest(
+      `/api/scheduled-executions?project_id=${projectId}`
+    );
+    return handleApiResponse<ScheduledExecution[]>(response);
+  },
+
+  get: async (id: string): Promise<ScheduledExecution> => {
+    const response = await makeRequest(`/api/scheduled-executions/${id}`);
+    return handleApiResponse<ScheduledExecution>(response);
+  },
+
+  cancel: async (id: string): Promise<void> => {
+    const response = await makeRequest(`/api/scheduled-executions/${id}`, {
+      method: 'DELETE',
+    });
+    return handleApiResponse<void>(response);
   },
 };

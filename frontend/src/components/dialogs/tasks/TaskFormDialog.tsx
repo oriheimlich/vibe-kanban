@@ -49,7 +49,9 @@ import type {
   TaskStatus,
   ExecutorProfileId,
   ImageResponse,
+  JsonValue,
 } from 'shared/types';
+import { scheduledExecutionsApi } from '@/lib/api';
 
 interface Task {
   id: string;
@@ -81,7 +83,20 @@ type TaskFormValues = {
   executorProfileId: ExecutorProfileId | null;
   repoBranches: RepoBranch[];
   autoStart: boolean;
+  scheduleAt: string;
 };
+
+function getMinDateTime(): string {
+  const now = new Date();
+  now.setSeconds(0, 0);
+  return now.toISOString().slice(0, 16);
+}
+
+function getDefaultScheduleTime(): string {
+  const d = new Date();
+  d.setHours(d.getHours() + 1, 0, 0, 0);
+  return d.toISOString().slice(0, 16);
+}
 
 const TaskFormDialogImpl = NiceModal.create<TaskFormDialogProps>((props) => {
   const { mode, projectId } = props;
@@ -136,6 +151,7 @@ const TaskFormDialogImpl = NiceModal.create<TaskFormDialogProps>((props) => {
           executorProfileId: baseProfile,
           repoBranches: defaultRepoBranches,
           autoStart: false,
+          scheduleAt: '',
         };
 
       case 'duplicate':
@@ -146,6 +162,7 @@ const TaskFormDialogImpl = NiceModal.create<TaskFormDialogProps>((props) => {
           executorProfileId: baseProfile,
           repoBranches: defaultRepoBranches,
           autoStart: true,
+          scheduleAt: '',
         };
 
       case 'subtask':
@@ -158,6 +175,7 @@ const TaskFormDialogImpl = NiceModal.create<TaskFormDialogProps>((props) => {
           executorProfileId: baseProfile,
           repoBranches: defaultRepoBranches,
           autoStart: true,
+          scheduleAt: '',
         };
     }
   }, [mode, props, system.config?.executor_profile, defaultRepoBranches]);
@@ -192,7 +210,23 @@ const TaskFormDialogImpl = NiceModal.create<TaskFormDialogProps>((props) => {
         shared_task_id: null,
       };
       const shouldAutoStart = value.autoStart && !forceCreateOnlyRef.current;
-      if (shouldAutoStart) {
+      const isScheduled = shouldAutoStart && value.scheduleAt !== '';
+      if (isScheduled) {
+        // Create task first, then schedule
+        const createdTask = await createTask.mutateAsync(task);
+        await scheduledExecutionsApi.create({
+          taskId: createdTask.id,
+          projectId,
+          scheduledAt: new Date(value.scheduleAt).toISOString(),
+          executorProfileId:
+            value.executorProfileId as unknown as JsonValue,
+          repos: value.repoBranches.map((rb) => ({
+            repoId: rb.repoId,
+            targetBranch: rb.branch,
+          })),
+        });
+        modal.remove();
+      } else if (shouldAutoStart) {
         const repos = value.repoBranches.map((rb) => ({
           repo_id: rb.repoId,
           target_branch: rb.branch,
@@ -220,6 +254,10 @@ const TaskFormDialogImpl = NiceModal.create<TaskFormDialogProps>((props) => {
         value.repoBranches.some((rb) => !rb.branch)
       ) {
         return 'need branch for all repos';
+      }
+      if (value.scheduleAt) {
+        const scheduledDate = new Date(value.scheduleAt);
+        if (scheduledDate <= new Date()) return 'schedule must be in the future';
       }
     }
   };
@@ -607,46 +645,98 @@ const TaskFormDialogImpl = NiceModal.create<TaskFormDialogProps>((props) => {
           )}
 
           {/* Actions */}
-          <div className="flex items-center justify-between gap-3">
-            {/* Attach Image*/}
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={dropzoneOpen}
-                className="h-9 w-9 p-0 rounded-none"
-                aria-label={t('taskFormDialog.attachImage')}
-              >
-                <ImageIcon className="h-4 w-4" />
-              </Button>
-            </div>
+          <div className="space-y-3">
+            {/* Schedule datetime picker (shown when schedule is toggled on) */}
+            {!editMode && (
+              <form.Field name="scheduleAt">
+                {(scheduleField) =>
+                  scheduleField.state.value !== '' ? (
+                    <input
+                      type="datetime-local"
+                      value={scheduleField.state.value}
+                      onChange={(e) =>
+                        scheduleField.handleChange(e.target.value)
+                      }
+                      min={getMinDateTime()}
+                      disabled={isSubmitting}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                  ) : null
+                }
+              </form.Field>
+            )}
 
-            {/* Autostart switch */}
-            <div className="flex items-center gap-3">
-              {!editMode && (
-                <form.Field name="autoStart">
-                  {(field) => (
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="autostart-switch"
-                        checked={field.state.value}
-                        onCheckedChange={(checked) =>
-                          field.handleChange(checked)
-                        }
-                        disabled={isSubmitting}
-                        className="data-[state=checked]:bg-gray-900 dark:data-[state=checked]:bg-gray-100"
-                        aria-label={t('taskFormDialog.startLabel')}
-                      />
-                      <Label
-                        htmlFor="autostart-switch"
-                        className="text-sm cursor-pointer"
-                      >
-                        {t('taskFormDialog.startLabel')}
-                      </Label>
-                    </div>
-                  )}
-                </form.Field>
-              )}
+            <div className="flex items-center justify-between gap-3">
+              {/* Attach Image*/}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={dropzoneOpen}
+                  className="h-9 w-9 p-0 rounded-none"
+                  aria-label={t('taskFormDialog.attachImage')}
+                >
+                  <ImageIcon className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* Toggles and submit */}
+              <div className="flex items-center gap-3">
+                {!editMode && (
+                  <>
+                    <form.Field name="autoStart">
+                      {(field) => (
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="autostart-switch"
+                            checked={field.state.value}
+                            onCheckedChange={(checked) =>
+                              field.handleChange(checked)
+                            }
+                            disabled={isSubmitting}
+                            className="data-[state=checked]:bg-gray-900 dark:data-[state=checked]:bg-gray-100"
+                            aria-label={t('taskFormDialog.startLabel')}
+                          />
+                          <Label
+                            htmlFor="autostart-switch"
+                            className="text-sm cursor-pointer"
+                          >
+                            {t('taskFormDialog.startLabel')}
+                          </Label>
+                        </div>
+                      )}
+                    </form.Field>
+                    <form.Field name="autoStart">
+                      {(autoStartField) =>
+                        autoStartField.state.value ? (
+                          <form.Field name="scheduleAt">
+                            {(scheduleField) => (
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  id="schedule-switch"
+                                  checked={scheduleField.state.value !== ''}
+                                  onCheckedChange={(checked) =>
+                                    scheduleField.handleChange(
+                                      checked ? getDefaultScheduleTime() : ''
+                                    )
+                                  }
+                                  disabled={isSubmitting}
+                                  className="data-[state=checked]:bg-gray-900 dark:data-[state=checked]:bg-gray-100"
+                                />
+                                <Label
+                                  htmlFor="schedule-switch"
+                                  className="text-sm cursor-pointer"
+                                >
+                                  {t('taskFormDialog.scheduleLabel')}
+                                </Label>
+                              </div>
+                            )}
+                          </form.Field>
+                        ) : null
+                      }
+                    </form.Field>
+                  </>
+                )}
 
               {/* Create/Start/Update button*/}
               <form.Subscribe
@@ -657,15 +747,20 @@ const TaskFormDialogImpl = NiceModal.create<TaskFormDialogProps>((props) => {
                 })}
               >
                 {({ canSubmit, isSubmitting, values }) => {
+                  const isScheduled = values.autoStart && values.scheduleAt !== '';
                   const buttonText = editMode
                     ? isSubmitting
                       ? t('taskFormDialog.updating')
                       : t('taskFormDialog.updateTask')
                     : isSubmitting
-                      ? values.autoStart
-                        ? t('taskFormDialog.starting')
-                        : t('taskFormDialog.creating')
-                      : t('taskFormDialog.create');
+                      ? isScheduled
+                        ? t('taskFormDialog.scheduling')
+                        : values.autoStart
+                          ? t('taskFormDialog.starting')
+                          : t('taskFormDialog.creating')
+                      : isScheduled
+                        ? t('taskFormDialog.schedule')
+                        : t('taskFormDialog.create');
 
                   return (
                     <Button onClick={form.handleSubmit} disabled={!canSubmit}>
@@ -675,6 +770,7 @@ const TaskFormDialogImpl = NiceModal.create<TaskFormDialogProps>((props) => {
                 }}
               </form.Subscribe>
             </div>
+          </div>
           </div>
         </div>
       </Dialog>

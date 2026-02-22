@@ -449,6 +449,14 @@
     "creating": "Creating...",
     "start": "Start"
   },
+  "scheduleExecutionDialog": {
+    "title": "Schedule Execution",
+    "description": "Schedule a coding agent to start working on this task at a specific time.",
+    "scheduledAt": "Run at",
+    "error": "Failed to schedule execution. Please try again.",
+    "scheduling": "Scheduling...",
+    "schedule": "Schedule"
+  },
   "repoBranchSelector": {
     "label": "Base branch"
   },
@@ -494,7 +502,8 @@
     "startReview": "Start Review",
     "startingReview": "Starting Review...",
     "task": "Task",
-    "duplicate": "Duplicate"
+    "duplicate": "Duplicate",
+    "scheduleExecution": "Schedule execution"
   },
   "editBranchName": {
     "dialog": {
@@ -614,6 +623,9 @@
       "cancelled": "Cancelled"
     },
     "startLabel": "Start",
+    "scheduleLabel": "Schedule for later",
+    "scheduling": "Scheduling...",
+    "schedule": "Schedule",
     "attachImage": "Attach image",
     "dropImagesHere": "Drop images here",
     "updating": "Updating...",
