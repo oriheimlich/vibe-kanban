@@ -132,6 +132,8 @@ pub trait Deployment: Clone + Send + Sync + 'static {
         PrMonitorService::spawn(db, analytics).await
     }
 
+    fn spawn_scheduler_service(&self) -> tokio::task::JoinHandle<()>;
+
     async fn track_if_analytics_allowed(&self, event_name: &str, properties: Value) {
         let analytics_enabled = self.config().read().await.analytics_enabled;
         // Track events unless user has explicitly opted out

@@ -7,6 +7,7 @@ pub mod merge;
 pub mod project;
 pub mod project_repo;
 pub mod repo;
+pub mod scheduled_execution;
 pub mod scratch;
 pub mod session;
 pub mod tag;

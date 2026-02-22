@@ -50,6 +50,14 @@ export type CreateTask = { project_id: string, title: string, description: strin
 
 export type UpdateTask = { title: string | null, description: string | null, status: TaskStatus | null, parent_workspace_id: string | null, image_ids: Array<string> | null, };
 
+export type ScheduledExecution = { id: string, task_id: string, project_id: string, scheduled_at: string, status: ScheduledExecutionStatus, executor_profile_id: string, repos: string, created_at: string, updated_at: string, fired_at: string | null, error_message: string | null, };
+
+export type ScheduledExecutionStatus = "pending" | "fired" | "cancelled";
+
+export type CreateScheduledExecutionRequest = { taskId: string, projectId: string, scheduledAt: string, executorProfileId: JsonValue, repos: Array<ScheduledRepoInput>, };
+
+export type ScheduledRepoInput = { repoId: string, targetBranch: string, };
+
 export type DraftFollowUpData = { message: string, executor_profile_id: ExecutorProfileId, };
 
 export type DraftWorkspaceData = { message: string, project_id: string | null, repos: Array<DraftWorkspaceRepo>, selected_profile: ExecutorProfileId | null, };

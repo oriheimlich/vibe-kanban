@@ -85,6 +85,10 @@ export {
 } from './tasks/EditBranchNameDialog';
 export { CreateAttemptDialog } from './tasks/CreateAttemptDialog';
 export {
+  ScheduleExecutionDialog,
+  type ScheduleExecutionDialogProps,
+} from './tasks/ScheduleExecutionDialog';
+export {
   StartReviewDialog,
   type StartReviewDialogProps,
 } from './tasks/StartReviewDialog';

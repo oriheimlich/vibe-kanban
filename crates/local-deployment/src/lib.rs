@@ -20,6 +20,7 @@ use services::services::{
     queued_message::QueuedMessageService,
     remote_client::{RemoteClient, RemoteClientError},
     repo::RepoService,
+    scheduler::SchedulerService,
     worktree_manager::WorktreeManager,
 };
 use tokio::sync::RwLock;
@@ -270,6 +271,10 @@ impl Deployment for LocalDeployment {
 
     fn auth_context(&self) -> &AuthContext {
         &self.auth_context
+    }
+
+    fn spawn_scheduler_service(&self) -> tokio::task::JoinHandle<()> {
+        SchedulerService::spawn(self.db.clone(), self.container.clone())
     }
 }
 

@@ -15,6 +15,7 @@ import { DeleteTaskConfirmationDialog } from '@/components/dialogs/tasks/DeleteT
 import { ViewProcessesDialog } from '@/components/dialogs/tasks/ViewProcessesDialog';
 import { ViewRelatedTasksDialog } from '@/components/dialogs/tasks/ViewRelatedTasksDialog';
 import { CreateAttemptDialog } from '@/components/dialogs/tasks/CreateAttemptDialog';
+import { ScheduleExecutionDialog } from '@/components/dialogs/tasks/ScheduleExecutionDialog';
 import { GitActionsDialog } from '@/components/dialogs/tasks/GitActionsDialog';
 import { EditBranchNameDialog } from '@/components/dialogs/tasks/EditBranchNameDialog';
 import { useProject } from '@/contexts/ProjectContext';
@@ -93,6 +94,14 @@ export function ActionsDropdown({ task, attempt }: ActionsDropdownProps) {
     e.stopPropagation();
     if (!task?.id) return;
     CreateAttemptDialog.show({
+      taskId: task.id,
+    });
+  };
+
+  const handleScheduleExecution = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!task?.id) return;
+    ScheduleExecutionDialog.show({
       taskId: task.id,
     });
   };
@@ -192,6 +201,9 @@ export function ActionsDropdown({ task, attempt }: ActionsDropdownProps) {
           {hasTaskActions && (
             <>
               <DropdownMenuLabel>{t('actionsMenu.task')}</DropdownMenuLabel>
+              <DropdownMenuItem onClick={handleScheduleExecution}>
+                {t('actionsMenu.scheduleExecution')}
+              </DropdownMenuItem>
               <DropdownMenuItem disabled={!projectId} onClick={handleEdit}>
                 {t('common:buttons.edit')}
               </DropdownMenuItem>

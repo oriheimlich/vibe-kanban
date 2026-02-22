@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO scheduled_executions (id, task_id, project_id, scheduled_at, executor_profile_id, repos)\n               VALUES ($1, $2, $3, $4, $5, $6)\n               RETURNING\n                   id                  AS \"id!: Uuid\",\n                   task_id             AS \"task_id!: Uuid\",\n                   project_id          AS \"project_id!: Uuid\",\n                   scheduled_at        AS \"scheduled_at!: DateTime<Utc>\",\n                   status              AS \"status!: ScheduledExecutionStatus\",\n                   executor_profile_id,\n                   repos,\n                   created_at          AS \"created_at!: DateTime<Utc>\",\n                   updated_at          AS \"updated_at!: DateTime<Utc>\",\n                   fired_at            AS \"fired_at: DateTime<Utc>\",\n                   error_message",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "task_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Blob"
+      },
+      {
+        "name": "project_id!: Uuid",
+        "ordinal": 2,
+        "type_info": "Blob"
+      },
+      {
+        "name": "scheduled_at!: DateTime<Utc>",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!: ScheduledExecutionStatus",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "executor_profile_id",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "repos",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!: DateTime<Utc>",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!: DateTime<Utc>",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "fired_at: DateTime<Utc>",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "error_message",
+        "ordinal": 10,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "42c739a5edde7f90301da4d14843b3b2a3503533c6a015b36452b0065c4ad27f"
+}
